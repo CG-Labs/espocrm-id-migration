@@ -181,7 +181,7 @@ async Task<int> Stage3_DumpData()
         "note", "email_email_account", "entity_user", "email"
     };
 
-    var baseArgs = $"-h {connParts["host"]} -P {connParts["port"]} -u {connParts["user"]} -p{connParts["password"]} --no-create-info --complete-insert --skip-extended-insert --skip-lock-tables --no-tablespaces";
+    var baseArgs = $"-h {connParts["host"]} -P {connParts["port"]} -u {connParts["user"]} -p{connParts["password"]} --no-create-info --complete-insert --skip-extended-insert --skip-lock-tables --no-tablespaces --set-gtid-purged=OFF";
 
     // Dump 7 large tables
     Console.WriteLine("Dumping 7 large tables...\n");
