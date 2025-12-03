@@ -191,26 +191,25 @@ async Task<int> Stage3_DumpData()
         var file = Path.Combine(outputPath, $"03_{table}.sql");
         Console.Write($"[{i + 1}/7] {table}... ");
 
+        // Use shell redirection to avoid loading huge dumps into memory
+        var cmd = $"mysqldump {baseArgs} espocrm {table} > \"{file}\"";
+
         var psi = new ProcessStartInfo
         {
-            FileName = "mysqldump",
-            Arguments = $"{baseArgs} espocrm {table}",
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
+            FileName = "/bin/bash",
+            Arguments = $"-c \"{cmd}\"",
             UseShellExecute = false
         };
 
         using var process = Process.Start(psi);
-        var output = await process!.StandardOutput.ReadToEndAsync();
-        await process.WaitForExitAsync();
+        await process!.WaitForExitAsync();
 
-        if (process.ExitCode != 0)
+        if (process.ExitCode != 0 || !File.Exists(file))
         {
             Console.WriteLine("ERROR");
             continue;
         }
 
-        await File.WriteAllTextAsync(file, output);
         Console.WriteLine($"{new FileInfo(file).Length / 1024 / 1024} MB");
     }
 
@@ -219,22 +218,25 @@ async Task<int> Stage3_DumpData()
     var ignore = string.Join(" ", largeTables.Select(t => $"--ignore-table=espocrm.{t}"));
     var batchFile = Path.Combine(outputPath, "03_batch_tables.sql");
 
+    // Use shell redirection
+    var batchCmd = $"mysqldump {baseArgs} {ignore} espocrm > \"{batchFile}\"";
+
     var batchPsi = new ProcessStartInfo
     {
-        FileName = "mysqldump",
-        Arguments = $"{baseArgs} {ignore} espocrm",
-        RedirectStandardOutput = true,
-        RedirectStandardError = true,
+        FileName = "/bin/bash",
+        Arguments = $"-c \"{batchCmd}\"",
         UseShellExecute = false
     };
 
     using (var process = Process.Start(batchPsi))
     {
-        var output = await process!.StandardOutput.ReadToEndAsync();
-        await process.WaitForExitAsync();
+        await process!.WaitForExitAsync();
 
-        if (process.ExitCode != 0) return 1;
-        await File.WriteAllTextAsync(batchFile, output);
+        if (process.ExitCode != 0 || !File.Exists(batchFile))
+        {
+            Console.WriteLine("ERROR");
+            return 1;
+        }
     }
 
     Console.WriteLine($"✓ Batch ({new FileInfo(batchFile).Length / 1024 / 1024} MB)\n");
