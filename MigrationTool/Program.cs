@@ -71,35 +71,36 @@ async Task<int> Stage1_GenerateMapping()
     await writer.WriteLineAsync("TRUNCATE TABLE espocrm_migration.id_mapping;");
     await writer.WriteLineAsync();
 
-    // Query information_schema to get table list
+    // Query information_schema to get ALL varchar(17) columns (id and *_id)
     using var conn = new MySqlConnection(connectionString);
     await conn.OpenAsync();
 
     using var cmd = new MySqlCommand(@"
-        SELECT TABLE_NAME
+        SELECT DISTINCT TABLE_NAME, COLUMN_NAME
         FROM information_schema.COLUMNS
         WHERE TABLE_SCHEMA = 'espocrm'
-        AND COLUMN_NAME = 'id'
+        AND COLUMN_NAME REGEXP '^(id|[a-z_]+_id)$'
         AND DATA_TYPE = 'varchar'
         AND CHARACTER_MAXIMUM_LENGTH = 17
-        ORDER BY TABLE_NAME", conn);
+        ORDER BY TABLE_NAME, COLUMN_NAME", conn);
 
-    var tables = new List<string>();
+    var tableColumns = new List<(string table, string column)>();
     using (var reader = await cmd.ExecuteReaderAsync())
     {
         while (await reader.ReadAsync())
         {
-            tables.Add(reader.GetString(0));
+            tableColumns.Add((reader.GetString(0), reader.GetString(1)));
         }
     }
 
-    await writer.WriteLineAsync($"-- Generating mappings for {tables.Count} tables");
+    await writer.WriteLineAsync($"-- Generating mappings from {tableColumns.Count} varchar(17) columns across all tables");
     await writer.WriteLineAsync();
 
-    foreach (var table in tables)
+    foreach (var (table, column) in tableColumns)
     {
-        await writer.WriteLineAsync($"INSERT INTO espocrm_migration.id_mapping (old_id, new_id)");
-        await writer.WriteLineAsync($"SELECT id, UUID_SHORT() FROM espocrm.`{table}` WHERE id IS NOT NULL;");
+        await writer.WriteLineAsync($"-- {table}.{column}");
+        await writer.WriteLineAsync($"INSERT IGNORE INTO espocrm_migration.id_mapping (old_id, new_id)");
+        await writer.WriteLineAsync($"SELECT DISTINCT `{column}`, UUID_SHORT() FROM espocrm.`{table}` WHERE `{column}` IS NOT NULL;");
         await writer.WriteLineAsync();
     }
 
