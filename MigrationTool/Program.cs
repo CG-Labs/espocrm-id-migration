@@ -287,6 +287,7 @@ async Task<int> Stage4_TransformDumps()
 
     // Step 3: Transform each dump file
     var idPattern = new Regex(@"'([0-9a-f]{17})'");
+    var urlPattern = new Regex(@"/#[A-Za-z]+/view/([0-9a-f]{17})");
 
     foreach (var dumpFile in dumpFiles)
     {
@@ -319,6 +320,17 @@ async Task<int> Stage4_TransformDumps()
             {
                 var oldId = match.Groups[1].Value;
                 return mapping.TryGetValue(oldId, out var newId) ? $"'{newId}'" : match.Value;
+            });
+
+            // Also replace URL patterns like /#Entity/view/ID
+            transformed = urlPattern.Replace(transformed, match =>
+            {
+                var oldId = match.Groups[1].Value;
+                if (mapping.TryGetValue(oldId, out var newId))
+                {
+                    return match.Value.Replace(oldId, newId.ToString());
+                }
+                return match.Value;
             });
 
             await writer.WriteLineAsync(transformed);
@@ -373,6 +385,7 @@ async Task<int> Stage4b_PatchTransformedFiles()
     Console.WriteLine($"Patching {transformedFiles.Length} transformed files...\n");
 
     var idPattern = new Regex(@"'([0-9a-f]{17})'");
+    var urlPattern = new Regex(@"/#[A-Za-z]+/view/([0-9a-f]{17})");
 
     foreach (var file in transformedFiles)
     {
@@ -399,6 +412,18 @@ async Task<int> Stage4b_PatchTransformedFiles()
                 {
                     replacements++;
                     return $"'{newId}'";
+                }
+                return match.Value;
+            });
+
+            // Also replace URL patterns
+            transformed = urlPattern.Replace(transformed, match =>
+            {
+                var oldId = match.Groups[1].Value;
+                if (mapping.TryGetValue(oldId, out var newId))
+                {
+                    replacements++;
+                    return match.Value.Replace(oldId, newId.ToString());
                 }
                 return match.Value;
             });
