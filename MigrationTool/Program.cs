@@ -28,11 +28,12 @@ Console.WriteLine("  1. Generate ID mapping SQL");
 Console.WriteLine("  2. Dump and transform schema");
 Console.WriteLine("  3. Dump data (7 large + 811 batch)");
 Console.WriteLine("  4. Transform dumps");
+Console.WriteLine("  4b. Patch transformed files (fix missed FKs)");
 Console.WriteLine("  5. Import transformed data");
 Console.WriteLine("  6. Benchmark queries (varchar vs bigint)");
 Console.WriteLine("  7. Run all stages");
 Console.WriteLine();
-Console.Write("Select (1-7): ");
+Console.Write("Select (1-7 or 4b): ");
 
 var choice = Console.ReadLine();
 
@@ -42,6 +43,7 @@ return choice switch
     "2" => await Stage2_SchemaMigration(),
     "3" => await Stage3_DumpData(),
     "4" => await Stage4_TransformDumps(),
+    "4b" => await Stage4b_PatchTransformedFiles(),
     "5" => await Stage5_ImportData(),
     "6" => await Stage6_BenchmarkQueries(),
     "7" => await RunAll(),
@@ -334,6 +336,87 @@ async Task<int> Stage4_TransformDumps()
     }
 
     Console.WriteLine($"\n✓ Stage 4 Complete - {dumpFiles.Length} files transformed\n");
+
+    return 0;
+}
+
+async Task<int> Stage4b_PatchTransformedFiles()
+{
+    Console.WriteLine("\n=== Stage 4b: Patch Transformed Files ===\n");
+
+    // Load complete id_mapping
+    Console.WriteLine("Loading complete ID mapping...");
+    using var conn = new MySqlConnection(connectionString);
+    await conn.OpenAsync();
+
+    var mapping = new Dictionary<string, long>();
+    using (var cmd = new MySqlCommand("SELECT old_id, new_id FROM espocrm_migration.id_mapping", conn))
+    {
+        using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            mapping[reader.GetString(0)] = reader.GetInt64(1);
+        }
+    }
+
+    Console.WriteLine($"✓ Loaded {mapping.Count:N0} mappings\n");
+
+    // Find transformed files
+    var transformedFiles = Directory.GetFiles(outputPath, "04_*.transformed.sql").OrderBy(f => f).ToArray();
+
+    if (transformedFiles.Length == 0)
+    {
+        Console.WriteLine("ERROR: No transformed files found");
+        return 1;
+    }
+
+    Console.WriteLine($"Patching {transformedFiles.Length} transformed files...\n");
+
+    var idPattern = new Regex(@"'([0-9a-f]{17})'");
+
+    foreach (var file in transformedFiles)
+    {
+        var fileName = Path.GetFileName(file);
+        Console.Write($"Patching {fileName}... ");
+
+        var tempFile = file + ".patch";
+
+        // Stream read, replace remaining varchar IDs, write
+        using var reader = new StreamReader(file);
+        using var writer = new StreamWriter(tempFile);
+
+        int replacements = 0;
+
+        while (!reader.EndOfStream)
+        {
+            var line = await reader.ReadLineAsync();
+            if (line == null) break;
+
+            var transformed = idPattern.Replace(line, match =>
+            {
+                var oldId = match.Groups[1].Value;
+                if (mapping.TryGetValue(oldId, out var newId))
+                {
+                    replacements++;
+                    return $"'{newId}'";
+                }
+                return match.Value;
+            });
+
+            await writer.WriteLineAsync(transformed);
+        }
+
+        reader.Close();
+        writer.Close();
+
+        // Replace original with patched
+        File.Delete(file);
+        File.Move(tempFile, file);
+
+        Console.WriteLine($"✓ {replacements:N0} varchar IDs replaced");
+    }
+
+    Console.WriteLine($"\n✓ Patch complete\n");
 
     return 0;
 }
