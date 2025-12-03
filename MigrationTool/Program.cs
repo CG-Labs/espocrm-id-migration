@@ -66,22 +66,38 @@ async Task<int> Stage1_GenerateMapping()
     await writer.WriteLineAsync();
     await writer.WriteLineAsync("TRUNCATE TABLE espocrm_migration.id_mapping;");
     await writer.WriteLineAsync();
-    await writer.WriteLineAsync("SET @sql = (");
-    await writer.WriteLineAsync("  SELECT GROUP_CONCAT(");
-    await writer.WriteLineAsync("    CONCAT(");
-    await writer.WriteLineAsync("      'INSERT INTO espocrm_migration.id_mapping (old_id, new_id) ',");
-    await writer.WriteLineAsync("      'SELECT id, UUID_SHORT() FROM espocrm.`', TABLE_NAME, '` WHERE id IS NOT NULL;'");
-    await writer.WriteLineAsync("    ) SEPARATOR ' '");
-    await writer.WriteLineAsync("  ) FROM information_schema.COLUMNS");
-    await writer.WriteLineAsync("  WHERE TABLE_SCHEMA = 'espocrm'");
-    await writer.WriteLineAsync("    AND COLUMN_NAME = 'id'");
-    await writer.WriteLineAsync("    AND DATA_TYPE = 'varchar'");
-    await writer.WriteLineAsync("    AND CHARACTER_MAXIMUM_LENGTH = 17");
-    await writer.WriteLineAsync(");");
+
+    // Query information_schema to get table list
+    using var conn = new MySqlConnection(connectionString);
+    await conn.OpenAsync();
+
+    using var cmd = new MySqlCommand(@"
+        SELECT TABLE_NAME
+        FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = 'espocrm'
+        AND COLUMN_NAME = 'id'
+        AND DATA_TYPE = 'varchar'
+        AND CHARACTER_MAXIMUM_LENGTH = 17
+        ORDER BY TABLE_NAME", conn);
+
+    var tables = new List<string>();
+    using (var reader = await cmd.ExecuteReaderAsync())
+    {
+        while (await reader.ReadAsync())
+        {
+            tables.Add(reader.GetString(0));
+        }
+    }
+
+    await writer.WriteLineAsync($"-- Generating mappings for {tables.Count} tables");
     await writer.WriteLineAsync();
-    await writer.WriteLineAsync("PREPARE stmt FROM @sql;");
-    await writer.WriteLineAsync("EXECUTE stmt;");
-    await writer.WriteLineAsync("DEALLOCATE PREPARE stmt;");
+
+    foreach (var table in tables)
+    {
+        await writer.WriteLineAsync($"INSERT INTO espocrm_migration.id_mapping (old_id, new_id)");
+        await writer.WriteLineAsync($"SELECT id, UUID_SHORT() FROM espocrm.`{table}` WHERE id IS NOT NULL;");
+        await writer.WriteLineAsync();
+    }
 
     Console.WriteLine($"✓ Generated: {sqlFile}\n");
     Console.WriteLine("Execute: mysql -u espocrm_migration -p < " + sqlFile);
