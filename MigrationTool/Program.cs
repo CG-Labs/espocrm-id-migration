@@ -288,6 +288,7 @@ async Task<int> Stage4_TransformDumps()
     // Step 3: Transform each dump file
     var idPattern = new Regex(@"'([0-9a-f]{17})'");
     var urlPattern = new Regex(@"/#[A-Za-z]+/view/([0-9a-f]{17})");
+    var queryStringPattern = new Regex(@"(entryPoint=[^&""]+&(?:amp;)?id=)([0-9a-f]{17})");
 
     foreach (var dumpFile in dumpFiles)
     {
@@ -329,6 +330,17 @@ async Task<int> Stage4_TransformDumps()
                 if (mapping.TryGetValue(oldId, out var newId))
                 {
                     return match.Value.Replace(oldId, newId.ToString());
+                }
+                return match.Value;
+            });
+
+            // Replace query string patterns like ?entryPoint=attachment&amp;id=ID
+            transformed = queryStringPattern.Replace(transformed, match =>
+            {
+                var oldId = match.Groups[2].Value;
+                if (mapping.TryGetValue(oldId, out var newId))
+                {
+                    return match.Groups[1].Value + newId.ToString();
                 }
                 return match.Value;
             });
@@ -386,6 +398,7 @@ async Task<int> Stage4b_PatchTransformedFiles()
 
     var idPattern = new Regex(@"'([0-9a-f]{17})'");
     var urlPattern = new Regex(@"/#[A-Za-z]+/view/([0-9a-f]{17})");
+    var queryStringPattern = new Regex(@"(entryPoint=[^&""]+&(?:amp;)?id=)([0-9a-f]{17})");
 
     foreach (var file in transformedFiles)
     {
@@ -424,6 +437,18 @@ async Task<int> Stage4b_PatchTransformedFiles()
                 {
                     replacements++;
                     return match.Value.Replace(oldId, newId.ToString());
+                }
+                return match.Value;
+            });
+
+            // Replace query string patterns
+            transformed = queryStringPattern.Replace(transformed, match =>
+            {
+                var oldId = match.Groups[2].Value;
+                if (mapping.TryGetValue(oldId, out var newId))
+                {
+                    replacements++;
+                    return match.Groups[1].Value + newId.ToString();
                 }
                 return match.Value;
             });
