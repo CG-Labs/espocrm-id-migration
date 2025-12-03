@@ -29,9 +29,10 @@ Console.WriteLine("  2. Dump and transform schema");
 Console.WriteLine("  3. Dump data (7 large + 811 batch)");
 Console.WriteLine("  4. Transform dumps");
 Console.WriteLine("  5. Import transformed data");
-Console.WriteLine("  6. Run all stages");
+Console.WriteLine("  6. Benchmark queries (varchar vs bigint)");
+Console.WriteLine("  7. Run all stages");
 Console.WriteLine();
-Console.Write("Select (1-6): ");
+Console.Write("Select (1-7): ");
 
 var choice = Console.ReadLine();
 
@@ -42,7 +43,8 @@ return choice switch
     "3" => await Stage3_DumpData(),
     "4" => await Stage4_TransformDumps(),
     "5" => await Stage5_ImportData(),
-    "6" => await RunAll(),
+    "6" => await Stage6_BenchmarkQueries(),
+    "7" => await RunAll(),
     _ => 1
 };
 
@@ -401,6 +403,135 @@ async Task<int> Stage5_ImportData()
     Console.WriteLine($"\n✓ Stage 5 Complete - All files imported\n");
 
     return 0;
+}
+
+async Task<int> Stage6_BenchmarkQueries()
+{
+    Console.WriteLine("\n=== Stage 6: Benchmark Queries ===\n");
+
+    var slowLogPath = Path.Combine(outputPath, "mysql_slow_query.log");
+
+    if (!File.Exists(slowLogPath))
+    {
+        Console.WriteLine($"ERROR: Slow query log not found at {slowLogPath}");
+        return 1;
+    }
+
+    // Parse slow query log
+    Console.WriteLine("Parsing slow query log...");
+
+    var queries = new List<(double queryTime, string query)>();
+    var lines = File.ReadAllLines(slowLogPath);
+
+    double currentQueryTime = 0;
+    for (int i = 0; i < lines.Length; i++)
+    {
+        if (lines[i].StartsWith("# Query_time:"))
+        {
+            var parts = lines[i].Split(' ');
+            currentQueryTime = double.Parse(parts[2]);
+        }
+        else if (lines[i].StartsWith("SELECT") || lines[i].StartsWith("UPDATE") || lines[i].StartsWith("DELETE"))
+        {
+            var query = lines[i];
+            // Continue reading multi-line queries
+            while (i + 1 < lines.Length && !lines[i + 1].StartsWith("#") && !string.IsNullOrWhiteSpace(lines[i + 1]))
+            {
+                i++;
+                query += " " + lines[i];
+            }
+
+            if (currentQueryTime >= 10.0) // Only queries 10s+
+            {
+                queries.Add((currentQueryTime, query));
+            }
+        }
+    }
+
+    Console.WriteLine($"✓ Found {queries.Count} slow queries (>10s)\n");
+
+    if (queries.Count == 0)
+    {
+        Console.WriteLine("No queries to benchmark");
+        return 0;
+    }
+
+    // Load ID mapping for transformation
+    Console.WriteLine("Loading ID mapping...");
+    using var conn = new MySqlConnection(connectionString);
+    await conn.OpenAsync();
+
+    var mapping = new Dictionary<string, long>();
+    using (var cmd = new MySqlCommand("SELECT old_id, new_id FROM espocrm_migration.id_mapping", conn))
+    {
+        using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            mapping[reader.GetString(0)] = reader.GetInt64(1);
+        }
+    }
+
+    Console.WriteLine($"✓ Loaded {mapping.Count:N0} mappings\n");
+
+    // Transform and benchmark each query
+    var idPattern = new Regex(@"'([0-9a-f]{17})'");
+    var results = new List<string>();
+
+    for (int i = 0; i < queries.Count; i++)
+    {
+        var (originalTime, query) = queries[i];
+
+        Console.WriteLine($"[{i + 1}/{queries.Count}] Benchmarking query (original: {originalTime:F2}s)...");
+
+        // Transform query varchar IDs to bigint
+        var transformedQuery = idPattern.Replace(query, match =>
+        {
+            var oldId = match.Groups[1].Value;
+            return mapping.TryGetValue(oldId, out var newId) ? $"'{newId}'" : match.Value;
+        });
+
+        // Benchmark on espocrm (varchar)
+        var varcharTime = await BenchmarkQuery("espocrm", query);
+
+        // Benchmark on espocrm_migration (bigint)
+        var bigintTime = await BenchmarkQuery("espocrm_migration", transformedQuery);
+
+        var improvement = varcharTime > 0 ? ((varcharTime - bigintTime) / varcharTime * 100) : 0;
+
+        Console.WriteLine($"  VARCHAR: {varcharTime:F2}s | BIGINT: {bigintTime:F2}s | Improvement: {improvement:F1}%\n");
+
+        results.Add($"Query {i + 1}: VARCHAR {varcharTime:F2}s → BIGINT {bigintTime:F2}s ({improvement:F1}% improvement)");
+    }
+
+    // Save results
+    var reportPath = Path.Combine(outputPath, "benchmark_results.txt");
+    await File.WriteAllLinesAsync(reportPath, results);
+
+    Console.WriteLine($"✓ Benchmark complete - results saved to {reportPath}\n");
+
+    return 0;
+}
+
+async Task<double> BenchmarkQuery(string database, string query)
+{
+    using var conn = new MySqlConnection(connectionString.Replace("Database=espocrm", $"Database={database}"));
+    await conn.OpenAsync();
+
+    var sw = System.Diagnostics.Stopwatch.StartNew();
+    using var cmd = new MySqlCommand(query, conn);
+    cmd.CommandTimeout = 120;
+
+    try
+    {
+        using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync()) { } // Consume all rows
+        sw.Stop();
+        return sw.Elapsed.TotalSeconds;
+    }
+    catch
+    {
+        return -1; // Query failed
+    }
 }
 
 async Task<int> RunAll()
