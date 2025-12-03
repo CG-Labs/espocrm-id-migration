@@ -68,7 +68,7 @@ async Task<int> Stage1_GenerateMapping()
     await writer.WriteLineAsync("  INDEX idx_new_id (new_id)");
     await writer.WriteLineAsync(") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
     await writer.WriteLineAsync();
-    await writer.WriteLineAsync("TRUNCATE TABLE espocrm_migration.id_mapping;");
+    await writer.WriteLineAsync("-- Using INSERT IGNORE to skip duplicates (idempotent)");
     await writer.WriteLineAsync();
 
     // Query information_schema to get ALL varchar(17) columns (id and *_id)
