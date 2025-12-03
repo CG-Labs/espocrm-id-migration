@@ -481,7 +481,7 @@ async Task<int> Stage6_BenchmarkQueries()
     {
         var (originalTime, query) = queries[i];
 
-        Console.WriteLine($"[{i + 1}/{queries.Count}] Benchmarking query (original: {originalTime:F2}s)...");
+        Console.WriteLine($"[{i + 1}/{queries.Count}] Benchmarking query (original VARCHAR time: {originalTime:F2}s)...");
 
         // Transform query varchar IDs to bigint
         var transformedQuery = idPattern.Replace(query, match =>
@@ -490,17 +490,14 @@ async Task<int> Stage6_BenchmarkQueries()
             return mapping.TryGetValue(oldId, out var newId) ? $"'{newId}'" : match.Value;
         });
 
-        // Benchmark on espocrm (varchar)
-        var varcharTime = await BenchmarkQuery("espocrm", query);
-
-        // Benchmark on espocrm_migration (bigint)
+        // Benchmark on espocrm_migration (bigint) only
         var bigintTime = await BenchmarkQuery("espocrm_migration", transformedQuery);
 
-        var improvement = varcharTime > 0 ? ((varcharTime - bigintTime) / varcharTime * 100) : 0;
+        var improvement = bigintTime > 0 ? ((originalTime - bigintTime) / originalTime * 100) : 0;
 
-        Console.WriteLine($"  VARCHAR: {varcharTime:F2}s | BIGINT: {bigintTime:F2}s | Improvement: {improvement:F1}%\n");
+        Console.WriteLine($"  VARCHAR (original): {originalTime:F2}s | BIGINT: {bigintTime:F2}s | Improvement: {improvement:F1}%\n");
 
-        results.Add($"Query {i + 1}: VARCHAR {varcharTime:F2}s → BIGINT {bigintTime:F2}s ({improvement:F1}% improvement)");
+        results.Add($"Query {i + 1}: VARCHAR {originalTime:F2}s → BIGINT {bigintTime:F2}s ({improvement:F1}% improvement)");
     }
 
     // Save results
