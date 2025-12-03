@@ -28,9 +28,10 @@ Console.WriteLine("  1. Generate ID mapping SQL");
 Console.WriteLine("  2. Dump and transform schema");
 Console.WriteLine("  3. Dump data (7 large + 811 batch)");
 Console.WriteLine("  4. Transform dumps");
-Console.WriteLine("  5. Run all stages");
+Console.WriteLine("  5. Import transformed data");
+Console.WriteLine("  6. Run all stages");
 Console.WriteLine();
-Console.Write("Select (1-5): ");
+Console.Write("Select (1-6): ");
 
 var choice = Console.ReadLine();
 
@@ -40,7 +41,8 @@ return choice switch
     "2" => await Stage2_SchemaMigration(),
     "3" => await Stage3_DumpData(),
     "4" => await Stage4_TransformDumps(),
-    "5" => await RunAll(),
+    "5" => await Stage5_ImportData(),
+    "6" => await RunAll(),
     _ => 1
 };
 
@@ -333,11 +335,96 @@ async Task<int> Stage4_TransformDumps()
     return 0;
 }
 
+async Task<int> Stage5_ImportData()
+{
+    Console.WriteLine("\n=== Stage 5: Import Transformed Data ===\n");
+
+    var connParts = ParseConnectionString(connectionString);
+
+    // Find all transformed dump files
+    var transformedFiles = Directory.GetFiles(outputPath, "04_*.transformed.sql").OrderBy(f => f).ToArray();
+
+    if (transformedFiles.Length == 0)
+    {
+        Console.WriteLine("ERROR: No transformed files found. Run Stage 4 first.");
+        return 1;
+    }
+
+    Console.WriteLine($"Found {transformedFiles.Length} transformed files to import\n");
+
+    // Import each file
+    for (int i = 0; i < transformedFiles.Length; i++)
+    {
+        var file = transformedFiles[i];
+        var fileName = Path.GetFileName(file);
+
+        Console.WriteLine($"[{i + 1}/{transformedFiles.Length}] Importing {fileName}...");
+        Console.WriteLine($"  Size: {new FileInfo(file).Length / 1024 / 1024} MB");
+
+        // Import using mysql CLI with shell redirection
+        var importCmd = $"mysql -h {connParts["host"]} -P {connParts["port"]} -u {connParts["user"]} -p{connParts["password"]} espocrm_migration < \"{file}\"";
+
+        var psi = new ProcessStartInfo
+        {
+            FileName = "/bin/bash",
+            Arguments = $"-c \"{importCmd}\"",
+            UseShellExecute = false,
+            RedirectStandardError = true
+        };
+
+        var startTime = DateTime.Now;
+        using var process = Process.Start(psi);
+
+        // Monitor progress by checking SHOW PROCESSLIST every 10 seconds
+        while (!process!.HasExited)
+        {
+            await Task.Delay(10000);
+
+            var elapsed = (DateTime.Now - startTime).TotalMinutes;
+            Console.Write($"\r  Running... {elapsed:F1} minutes elapsed");
+        }
+
+        await process.WaitForExitAsync();
+        var error = await process.StandardError.ReadToEndAsync();
+
+        if (process.ExitCode != 0)
+        {
+            Console.WriteLine($"\n  ERROR: Import failed");
+            Console.WriteLine(error);
+            return 1;
+        }
+
+        var totalTime = (DateTime.Now - startTime).TotalMinutes;
+        Console.WriteLine($"\r  ✓ Complete in {totalTime:F1} minutes                    ");
+    }
+
+    Console.WriteLine($"\n✓ Stage 5 Complete - All files imported\n");
+
+    return 0;
+}
+
 async Task<int> RunAll()
 {
     Console.WriteLine("\n=== Running All Stages ===\n");
-    Console.WriteLine("Not implemented yet\n");
-    return 1;
+
+    Console.WriteLine("Stage 1: Generate ID mapping SQL...");
+    if (await Stage1_GenerateMapping() != 0) return 1;
+
+    Console.WriteLine("\nStage 2: Schema migration...");
+    if (await Stage2_SchemaMigration() != 0) return 1;
+
+    Console.WriteLine("\nStage 3: Data dumps...");
+    if (await Stage3_DumpData() != 0) return 1;
+
+    Console.WriteLine("\nStage 4: Transform dumps...");
+    if (await Stage4_TransformDumps() != 0) return 1;
+
+    Console.WriteLine("\nStage 5: Import data...");
+    if (await Stage5_ImportData() != 0) return 1;
+
+    Console.WriteLine("\n✓ All Stages Complete!\n");
+
+    return 0;
 }
 
 Dictionary<string, string> ParseConnectionString(string connStr)
