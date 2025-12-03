@@ -248,8 +248,89 @@ async Task<int> Stage3_DumpData()
 async Task<int> Stage4_TransformDumps()
 {
     Console.WriteLine("\n=== Stage 4: Transform Dumps ===\n");
-    Console.WriteLine("Not implemented yet\n");
-    return 1;
+
+    // Step 1: Load id_mapping dictionary from database
+    Console.WriteLine("Loading ID mapping from database...");
+
+    using var conn = new MySqlConnection(connectionString);
+    await conn.OpenAsync();
+
+    var mapping = new Dictionary<string, long>();
+    using (var cmd = new MySqlCommand("SELECT old_id, new_id FROM espocrm_migration.id_mapping", conn))
+    {
+        using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            mapping[reader.GetString(0)] = reader.GetInt64(1);
+        }
+    }
+
+    Console.WriteLine($"✓ Loaded {mapping.Count:N0} mappings\n");
+
+    // Step 2: Find all dump files
+    var dumpFiles = Directory.GetFiles(outputPath, "03_*.sql").OrderBy(f => f).ToArray();
+
+    if (dumpFiles.Length == 0)
+    {
+        Console.WriteLine("ERROR: No dump files found. Run Stage 3 first.");
+        return 1;
+    }
+
+    Console.WriteLine($"Found {dumpFiles.Length} dump files to transform\n");
+
+    // Step 3: Transform each dump file
+    var idPattern = new Regex(@"'([0-9a-f]{17})'");
+
+    foreach (var dumpFile in dumpFiles)
+    {
+        var fileName = Path.GetFileName(dumpFile);
+        var outputFile = Path.Combine(outputPath, fileName.Replace("03_", "04_").Replace(".sql", ".transformed.sql"));
+
+        Console.WriteLine($"Transforming {fileName}...");
+
+        // Count lines for progress
+        Console.Write("  Counting lines... ");
+        var totalLines = File.ReadLines(dumpFile).Count();
+        Console.WriteLine($"{totalLines:N0}");
+
+        // Transform with progress
+        using var reader = new StreamReader(dumpFile);
+        using var writer = new StreamWriter(outputFile);
+
+        var currentLine = 0;
+        var lastProgressUpdate = 0;
+
+        while (!reader.EndOfStream)
+        {
+            var line = await reader.ReadLineAsync();
+            if (line == null) break;
+
+            currentLine++;
+
+            // Replace all varchar(17) IDs with bigint from mapping
+            var transformed = idPattern.Replace(line, match =>
+            {
+                var oldId = match.Groups[1].Value;
+                return mapping.TryGetValue(oldId, out var newId) ? $"'{newId}'" : match.Value;
+            });
+
+            await writer.WriteLineAsync(transformed);
+
+            // Update progress every 1%
+            var progress = (currentLine * 100) / totalLines;
+            if (progress > lastProgressUpdate)
+            {
+                lastProgressUpdate = progress;
+                Console.Write($"\r  Progress: [{currentLine:N0} / {totalLines:N0}] {progress}%");
+            }
+        }
+
+        Console.WriteLine($"\r  ✓ Complete: {new FileInfo(outputFile).Length / 1024 / 1024} MB");
+    }
+
+    Console.WriteLine($"\n✓ Stage 4 Complete - {dumpFiles.Length} files transformed\n");
+
+    return 0;
 }
 
 async Task<int> RunAll()
