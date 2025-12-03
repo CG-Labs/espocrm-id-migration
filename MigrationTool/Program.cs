@@ -149,9 +149,15 @@ async Task<int> Stage2_SchemaMigration()
     // Transform
     Console.WriteLine("Transforming varchar(17) → bigint...");
     var schema = await File.ReadAllTextAsync(tempFile);
+
+    // Transform varchar(17) columns to bigint
     var pattern = @"`(id|[a-z_]+_id)` varchar\(17\)( CHARACTER SET [^\s]+ COLLATE [^\s,]+)?";
     var transformed = Regex.Replace(schema, pattern, "`$1` bigint unsigned");
     var count = Regex.Matches(schema, pattern).Count;
+
+    // Fix DEFAULT '' for bigint columns (empty string not valid for bigint)
+    transformed = Regex.Replace(transformed, @"bigint unsigned NOT NULL DEFAULT ''", "bigint unsigned NOT NULL DEFAULT 0");
+    transformed = Regex.Replace(transformed, @"bigint unsigned DEFAULT ''", "bigint unsigned DEFAULT NULL");
 
     await File.WriteAllTextAsync(finalFile, transformed);
     File.Delete(tempFile);
