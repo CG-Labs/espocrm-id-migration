@@ -1,0 +1,254 @@
+using Microsoft.Extensions.Configuration;
+using MySqlConnector;
+using System.Diagnostics;
+using System.Text.RegularExpressions;
+
+// Load configuration
+var configuration = new ConfigurationBuilder()
+    .SetBasePath(Directory.GetCurrentDirectory())
+    .AddJsonFile("appsettings.json", optional: false)
+    .Build();
+
+var connectionString = configuration.GetConnectionString("StagingDatabase");
+var outputPath = configuration["OutputPath"] ?? "./migration-output";
+
+if (string.IsNullOrEmpty(connectionString))
+{
+    Console.WriteLine("ERROR: Connection string not found");
+    return 1;
+}
+
+Console.WriteLine("EspoCRM ID Migration Tool");
+Console.WriteLine("=========================\n");
+Console.WriteLine($"Output: {outputPath}\n");
+
+// Menu
+Console.WriteLine("Stages:");
+Console.WriteLine("  1. Generate ID mapping SQL");
+Console.WriteLine("  2. Dump and transform schema");
+Console.WriteLine("  3. Dump data (7 large + 811 batch)");
+Console.WriteLine("  4. Transform dumps");
+Console.WriteLine("  5. Run all stages");
+Console.WriteLine();
+Console.Write("Select (1-5): ");
+
+var choice = Console.ReadLine();
+
+return choice switch
+{
+    "1" => await Stage1_GenerateMapping(),
+    "2" => await Stage2_SchemaMigration(),
+    "3" => await Stage3_DumpData(),
+    "4" => await Stage4_TransformDumps(),
+    "5" => await RunAll(),
+    _ => 1
+};
+
+async Task<int> Stage1_GenerateMapping()
+{
+    Console.WriteLine("\n=== Stage 1: ID Mapping ===\n");
+
+    Directory.CreateDirectory(outputPath);
+    var sqlFile = Path.Combine(outputPath, "01_create_id_mapping.sql");
+
+    using var writer = new StreamWriter(sqlFile);
+
+    await writer.WriteLineAsync("-- Stage 1: ID Mapping Table");
+    await writer.WriteLineAsync("-- Generated: " + DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss") + " UTC");
+    await writer.WriteLineAsync();
+    await writer.WriteLineAsync("CREATE DATABASE IF NOT EXISTS espocrm_migration;");
+    await writer.WriteLineAsync();
+    await writer.WriteLineAsync("CREATE TABLE IF NOT EXISTS espocrm_migration.id_mapping (");
+    await writer.WriteLineAsync("  old_id VARCHAR(17) PRIMARY KEY,");
+    await writer.WriteLineAsync("  new_id BIGINT UNSIGNED NOT NULL,");
+    await writer.WriteLineAsync("  INDEX idx_new_id (new_id)");
+    await writer.WriteLineAsync(") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+    await writer.WriteLineAsync();
+    await writer.WriteLineAsync("TRUNCATE TABLE espocrm_migration.id_mapping;");
+    await writer.WriteLineAsync();
+    await writer.WriteLineAsync("SET @sql = (");
+    await writer.WriteLineAsync("  SELECT GROUP_CONCAT(");
+    await writer.WriteLineAsync("    CONCAT(");
+    await writer.WriteLineAsync("      'INSERT INTO espocrm_migration.id_mapping (old_id, new_id) ',");
+    await writer.WriteLineAsync("      'SELECT id, UUID_SHORT() FROM espocrm.`', TABLE_NAME, '` WHERE id IS NOT NULL;'");
+    await writer.WriteLineAsync("    ) SEPARATOR ' '");
+    await writer.WriteLineAsync("  ) FROM information_schema.COLUMNS");
+    await writer.WriteLineAsync("  WHERE TABLE_SCHEMA = 'espocrm'");
+    await writer.WriteLineAsync("    AND COLUMN_NAME = 'id'");
+    await writer.WriteLineAsync("    AND DATA_TYPE = 'varchar'");
+    await writer.WriteLineAsync("    AND CHARACTER_MAXIMUM_LENGTH = 17");
+    await writer.WriteLineAsync(");");
+    await writer.WriteLineAsync();
+    await writer.WriteLineAsync("PREPARE stmt FROM @sql;");
+    await writer.WriteLineAsync("EXECUTE stmt;");
+    await writer.WriteLineAsync("DEALLOCATE PREPARE stmt;");
+
+    Console.WriteLine($"✓ Generated: {sqlFile}\n");
+    Console.WriteLine("Execute: mysql -u espocrm_migration -p < " + sqlFile);
+    Console.WriteLine("Monitor: mysql -u espocrm_migration -p -e 'SHOW PROCESSLIST'\n");
+
+    return 0;
+}
+
+async Task<int> Stage2_SchemaMigration()
+{
+    Console.WriteLine("\n=== Stage 2: Schema Migration ===\n");
+
+    var connParts = ParseConnectionString(connectionString);
+    Directory.CreateDirectory(outputPath);
+
+    var tempFile = Path.Combine(outputPath, "temp_schema.sql");
+    var finalFile = Path.Combine(outputPath, "02_schema_migration.sql");
+
+    // Dump schema
+    Console.WriteLine("Dumping schema...");
+    var dumpArgs = $"-h {connParts["host"]} -P {connParts["port"]} -u {connParts["user"]} -p{connParts["password"]} --no-data --skip-lock-tables --no-tablespaces espocrm";
+
+    var psi = new ProcessStartInfo
+    {
+        FileName = "mysqldump",
+        Arguments = dumpArgs,
+        RedirectStandardOutput = true,
+        RedirectStandardError = true,
+        UseShellExecute = false
+    };
+
+    using (var process = Process.Start(psi))
+    {
+        var output = await process!.StandardOutput.ReadToEndAsync();
+        var error = await process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+
+        if (process.ExitCode != 0)
+        {
+            Console.WriteLine($"ERROR: {error}");
+            return 1;
+        }
+
+        await File.WriteAllTextAsync(tempFile, output);
+    }
+
+    Console.WriteLine($"✓ Dumped ({new FileInfo(tempFile).Length / 1024 / 1024} MB)\n");
+
+    // Transform
+    Console.WriteLine("Transforming varchar(17) → bigint...");
+    var schema = await File.ReadAllTextAsync(tempFile);
+    var pattern = @"`(id|[a-z_]+_id)` varchar\(17\)( CHARACTER SET [^\s]+ COLLATE [^\s,]+)?";
+    var transformed = Regex.Replace(schema, pattern, "`$1` bigint unsigned");
+    var count = Regex.Matches(schema, pattern).Count;
+
+    await File.WriteAllTextAsync(finalFile, transformed);
+    File.Delete(tempFile);
+
+    Console.WriteLine($"✓ Transformed {count} columns");
+    Console.WriteLine($"✓ Saved: {finalFile}\n");
+    Console.WriteLine("Execute: mysql -u espocrm_migration -p espocrm_migration < " + finalFile + "\n");
+
+    return 0;
+}
+
+async Task<int> Stage3_DumpData()
+{
+    Console.WriteLine("\n=== Stage 3: Data Dumps ===\n");
+
+    var connParts = ParseConnectionString(connectionString);
+    Directory.CreateDirectory(outputPath);
+
+    var largeTables = new[] {
+        "app_log_record", "action_history_record", "attachment",
+        "note", "email_email_account", "entity_user", "email"
+    };
+
+    var baseArgs = $"-h {connParts["host"]} -P {connParts["port"]} -u {connParts["user"]} -p{connParts["password"]} --no-create-info --complete-insert --skip-extended-insert --skip-lock-tables --no-tablespaces";
+
+    // Dump 7 large tables
+    Console.WriteLine("Dumping 7 large tables...\n");
+    for (int i = 0; i < largeTables.Length; i++)
+    {
+        var table = largeTables[i];
+        var file = Path.Combine(outputPath, $"03_{table}.sql");
+        Console.Write($"[{i + 1}/7] {table}... ");
+
+        var psi = new ProcessStartInfo
+        {
+            FileName = "mysqldump",
+            Arguments = $"{baseArgs} espocrm {table}",
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+
+        using var process = Process.Start(psi);
+        var output = await process!.StandardOutput.ReadToEndAsync();
+        await process.WaitForExitAsync();
+
+        if (process.ExitCode != 0)
+        {
+            Console.WriteLine("ERROR");
+            continue;
+        }
+
+        await File.WriteAllTextAsync(file, output);
+        Console.WriteLine($"{new FileInfo(file).Length / 1024 / 1024} MB");
+    }
+
+    // Dump remaining tables
+    Console.WriteLine("\nDumping remaining 811 tables...");
+    var ignore = string.Join(" ", largeTables.Select(t => $"--ignore-table=espocrm.{t}"));
+    var batchFile = Path.Combine(outputPath, "03_batch_tables.sql");
+
+    var batchPsi = new ProcessStartInfo
+    {
+        FileName = "mysqldump",
+        Arguments = $"{baseArgs} {ignore} espocrm",
+        RedirectStandardOutput = true,
+        RedirectStandardError = true,
+        UseShellExecute = false
+    };
+
+    using (var process = Process.Start(batchPsi))
+    {
+        var output = await process!.StandardOutput.ReadToEndAsync();
+        await process.WaitForExitAsync();
+
+        if (process.ExitCode != 0) return 1;
+        await File.WriteAllTextAsync(batchFile, output);
+    }
+
+    Console.WriteLine($"✓ Batch ({new FileInfo(batchFile).Length / 1024 / 1024} MB)\n");
+    Console.WriteLine("✓ Stage 3 Complete\n");
+
+    return 0;
+}
+
+async Task<int> Stage4_TransformDumps()
+{
+    Console.WriteLine("\n=== Stage 4: Transform Dumps ===\n");
+    Console.WriteLine("Not implemented yet\n");
+    return 1;
+}
+
+async Task<int> RunAll()
+{
+    Console.WriteLine("\n=== Running All Stages ===\n");
+    Console.WriteLine("Not implemented yet\n");
+    return 1;
+}
+
+Dictionary<string, string> ParseConnectionString(string connStr)
+{
+    return connStr.Split(';')
+        .Select(p => p.Split('='))
+        .Where(p => p.Length == 2)
+        .ToDictionary(
+            p => p[0].Trim().ToLower() switch
+            {
+                "server" => "host",
+                "uid" => "user",
+                "pwd" => "password",
+                _ => p[0].Trim().ToLower()
+            },
+            p => p[1].Trim(),
+            StringComparer.OrdinalIgnoreCase
+        );
+}
