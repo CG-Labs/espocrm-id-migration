@@ -118,7 +118,7 @@ async Task<int> Stage2_SchemaMigration()
 
     // Dump schema
     Console.WriteLine("Dumping schema...");
-    var dumpArgs = $"-h {connParts["host"]} -P {connParts["port"]} -u {connParts["user"]} -p{connParts["password"]} --no-data --skip-lock-tables --no-tablespaces espocrm";
+    var dumpArgs = $"-h {connParts["host"]} -P {connParts["port"]} -u {connParts["user"]} -p{connParts["password"]} --no-data --skip-lock-tables --no-tablespaces --set-gtid-purged=OFF espocrm";
 
     var psi = new ProcessStartInfo
     {
