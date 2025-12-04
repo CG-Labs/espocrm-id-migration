@@ -497,8 +497,8 @@ async Task<int> Stage5_ImportData()
         Console.WriteLine($"[{i + 1}/{transformedFiles.Length}] Importing {fileName}...");
         Console.WriteLine($"  Size: {new FileInfo(file).Length / 1024 / 1024} MB");
 
-        // Import using mysql CLI with shell redirection
-        var importCmd = $"mysql -h {connParts["host"]} -P {connParts["port"]} -u {connParts["user"]} -p{connParts["password"]} espocrm_migration < \"{file}\"";
+        // Import using mysql CLI with shell redirection and increased packet size
+        var importCmd = $"mysql -h {connParts["host"]} -P {connParts["port"]} -u {connParts["user"]} -p{connParts["password"]} --max-allowed-packet=1G espocrm_migration < \"{file}\"";
 
         var psi = new ProcessStartInfo
         {
