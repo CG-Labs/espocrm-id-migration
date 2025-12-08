@@ -139,8 +139,25 @@ async Task<int> Stage1_GenerateMapping()
     await writer.WriteLineAsync();
 
     Console.WriteLine($"✓ Generated: {sqlFile}\n");
-    Console.WriteLine("Execute: mysql -u espocrm_migration -p < " + sqlFile);
-    Console.WriteLine("Monitor: mysql -u espocrm_migration -p -e 'SHOW PROCESSLIST'\n");
+    Console.WriteLine("Executing mapping generation...");
+
+    // Execute the SQL in background
+    var execCmd = $"nohup mysql < '{sqlFile}' > /tmp/stage1_exec.log 2>&1 &";
+    var psi = new System.Diagnostics.ProcessStartInfo
+    {
+        FileName = "/bin/bash",
+        Arguments = $"-c \"{execCmd}\"",
+        UseShellExecute = false
+    };
+
+    using (var process = System.Diagnostics.Process.Start(psi))
+    {
+        await process!.WaitForExitAsync();
+    }
+
+    Console.WriteLine("✓ Mapping generation started in background");
+    Console.WriteLine("Monitor with: mysql -e 'SHOW PROCESSLIST'");
+    Console.WriteLine("Check progress: SELECT COUNT(*) FROM espocrm_migration.id_mapping\n");
 
     return 0;
 }
@@ -203,7 +220,27 @@ async Task<int> Stage2_SchemaMigration()
 
     Console.WriteLine($"✓ Transformed {count} columns");
     Console.WriteLine($"✓ Saved: {finalFile}\n");
-    Console.WriteLine("Execute: mysql -u espocrm_migration -p espocrm_migration < " + finalFile + "\n");
+    Console.WriteLine("Importing schema into espocrm_migration...");
+
+    var importCmd = $"mysql espocrm_migration < '{finalFile}'";
+    var importPsi = new System.Diagnostics.ProcessStartInfo
+    {
+        FileName = "/bin/bash",
+        Arguments = $"-c \"{importCmd}\"",
+        UseShellExecute = false
+    };
+
+    using (var importProcess = System.Diagnostics.Process.Start(importPsi))
+    {
+        await importProcess!.WaitForExitAsync();
+        if (importProcess.ExitCode != 0)
+        {
+            Console.WriteLine("ERROR: Schema import failed");
+            return 1;
+        }
+    }
+
+    Console.WriteLine("✓ Schema imported into espocrm_migration\n");
 
     return 0;
 }
@@ -398,7 +435,9 @@ async Task<int> Stage4_TransformDumps()
 
     Console.WriteLine($"\n✓ Stage 4 Complete - {dumpFiles.Length} files transformed\n");
 
-    return 0;
+    // Automatically run Stage 4b to patch any missed patterns
+    Console.WriteLine("Running Stage 4b to patch missed patterns...\n");
+    return await Stage4b_PatchTransformedFiles();
 }
 
 async Task<int> Stage4b_PatchTransformedFiles()
