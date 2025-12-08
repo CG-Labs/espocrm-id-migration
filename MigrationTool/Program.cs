@@ -49,7 +49,6 @@ while (true)
         "2" => await Stage2_SchemaMigration(),
         "3" => await Stage3_DumpData(),
         "4" => await Stage4_TransformDumps(),
-        "4b" => await Stage4b_PatchTransformedFiles(),
         "5" => await Stage5_ImportData(),
         "6" => await Stage6_BenchmarkQueries(),
         "7" => await RunAll(),
