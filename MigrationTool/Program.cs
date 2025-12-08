@@ -25,16 +25,15 @@ Console.WriteLine($"Output: {outputPath}\n");
 // Menu
 Console.WriteLine("Stages:");
 Console.WriteLine("  0. Drop and recreate espocrm_migration database");
-Console.WriteLine("  1. Generate ID mapping SQL");
-Console.WriteLine("  2. Dump and transform schema");
+Console.WriteLine("  1. Generate ID mapping");
+Console.WriteLine("  2. Dump and import schema");
 Console.WriteLine("  3. Dump data (7 large + 811 batch)");
-Console.WriteLine("  4. Transform dumps");
-Console.WriteLine("  4b. Patch transformed files (fix missed FKs)");
+Console.WriteLine("  4. Transform dumps (includes patching)");
 Console.WriteLine("  5. Import transformed data");
 Console.WriteLine("  6. Benchmark queries (varchar vs bigint)");
 Console.WriteLine("  7. Run all stages");
 Console.WriteLine();
-Console.Write("Select (0-7 or 4b): ");
+Console.Write("Select (0-7): ");
 
 var choice = Console.ReadLine();
 
