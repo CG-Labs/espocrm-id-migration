@@ -452,9 +452,7 @@ async Task<int> Stage4_TransformDumps()
 
     Console.WriteLine($"\n✓ Stage 4 Complete - {dumpFiles.Length} files transformed\n");
 
-    // Automatically run Stage 4b to patch any missed patterns
-    Console.WriteLine("Running Stage 4b to patch missed patterns...\n");
-    return await Stage4b_PatchTransformedFiles();
+    return 0;
 }
 
 async Task<int> Stage4b_PatchTransformedFiles()
