@@ -267,7 +267,6 @@ async Task<int> Stage3_DumpData()
 {
     Console.WriteLine("\n=== Stage 3: Data Dumps ===\n");
 
-    var connParts = ParseConnectionString(connectionString);
     Directory.CreateDirectory(outputPath);
 
     var largeTables = new[] {
@@ -275,7 +274,8 @@ async Task<int> Stage3_DumpData()
         "note", "email_email_account", "entity_user", "email"
     };
 
-    var baseArgs = $"-h {connParts["host"]} -P {connParts["port"]} -u {connParts["user"]} -p{connParts["password"]} --no-create-info --complete-insert --skip-extended-insert --skip-lock-tables --no-tablespaces --set-gtid-purged=OFF";
+    // Use root with socket auth (no password, no host/port for localhost)
+    var baseArgs = "--no-create-info --complete-insert --skip-extended-insert --skip-lock-tables --no-tablespaces --set-gtid-purged=OFF";
 
     // Dump 7 large tables
     Console.WriteLine("Dumping 7 large tables...\n");
