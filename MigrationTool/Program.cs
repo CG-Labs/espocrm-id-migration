@@ -106,6 +106,13 @@ async Task<int> Stage1_GenerateMapping()
         await writer.WriteLineAsync();
     }
 
+    // Add hardcoded external key IDs
+    await writer.WriteLineAsync("-- External key IDs (non-standard format)");
+    await writer.WriteLineAsync("INSERT IGNORE INTO espocrm_migration.id_mapping (old_id, new_id) VALUES ('EK1764', UUID_SHORT());");
+    await writer.WriteLineAsync("INSERT IGNORE INTO espocrm_migration.id_mapping (old_id, new_id) VALUES ('EK2805', UUID_SHORT());");
+    await writer.WriteLineAsync("INSERT IGNORE INTO espocrm_migration.id_mapping (old_id, new_id) VALUES ('EK4130', UUID_SHORT());");
+    await writer.WriteLineAsync();
+
     Console.WriteLine($"✓ Generated: {sqlFile}\n");
     Console.WriteLine("Execute: mysql -u espocrm_migration -p < " + sqlFile);
     Console.WriteLine("Monitor: mysql -u espocrm_migration -p -e 'SHOW PROCESSLIST'\n");
@@ -345,6 +352,11 @@ async Task<int> Stage4_TransformDumps()
                 return match.Value;
             });
 
+            // Replace hardcoded external key IDs
+            if (mapping.TryGetValue("EK1764", out var ek1764)) transformed = transformed.Replace("'EK1764'", $"'{ek1764}'");
+            if (mapping.TryGetValue("EK2805", out var ek2805)) transformed = transformed.Replace("'EK2805'", $"'{ek2805}'");
+            if (mapping.TryGetValue("EK4130", out var ek4130)) transformed = transformed.Replace("'EK4130'", $"'{ek4130}'");
+
             await writer.WriteLineAsync(transformed);
 
             // Update progress every 1%
@@ -452,6 +464,11 @@ async Task<int> Stage4b_PatchTransformedFiles()
                 }
                 return match.Value;
             });
+
+            // Replace hardcoded external key IDs
+            if (mapping.TryGetValue("EK1764", out var ek1764)) { var c = transformed.Replace("'EK1764'", $"'{ek1764}'"); if (c != transformed) { replacements++; transformed = c; } }
+            if (mapping.TryGetValue("EK2805", out var ek2805)) { var c = transformed.Replace("'EK2805'", $"'{ek2805}'"); if (c != transformed) { replacements++; transformed = c; } }
+            if (mapping.TryGetValue("EK4130", out var ek4130)) { var c = transformed.Replace("'EK4130'", $"'{ek4130}'"); if (c != transformed) { replacements++; transformed = c; } }
 
             await writer.WriteLineAsync(transformed);
         }
