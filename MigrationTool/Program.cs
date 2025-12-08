@@ -54,40 +54,23 @@ return choice switch
 
 async Task<int> Stage0_RecreateDatabase()
 {
-    Console.WriteLine("\n=== Stage 0: Recreate Database ===\n");
+    Console.WriteLine("\n=== Stage 0: Drop and Recreate Database ===\n");
 
     var sqlFile = Path.Combine("..", "00_recreate_database.sql");
-    var schemaFile = Path.Combine(outputPath, "02_schema_migration.sql");
 
-    Console.WriteLine("Dropping and recreating database...");
-    var dropCmd = $"mysql < '{sqlFile}'";
-
+    var cmd = $"mysql < '{sqlFile}'";
     var psi = new System.Diagnostics.ProcessStartInfo
     {
         FileName = "/bin/bash",
-        Arguments = $"-c \"{dropCmd}\"",
+        Arguments = $"-c \"{cmd}\"",
         UseShellExecute = false
     };
 
     using var process = System.Diagnostics.Process.Start(psi);
     await process!.WaitForExitAsync();
 
-    Console.WriteLine("✓ Database recreated\n");
-    Console.WriteLine("Importing schema...");
-
-    var importCmd = $"mysql espocrm_migration < '{schemaFile}'";
-    psi = new System.Diagnostics.ProcessStartInfo
-    {
-        FileName = "/bin/bash",
-        Arguments = $"-c \"{importCmd}\"",
-        UseShellExecute = false
-    };
-
-    using var process2 = System.Diagnostics.Process.Start(psi);
-    await process2!.WaitForExitAsync();
-
-    Console.WriteLine("✓ Schema imported\n");
-    Console.WriteLine("✓ espocrm_migration ready for fresh data\n");
+    Console.WriteLine("✓ espocrm_migration database dropped and recreated\n");
+    Console.WriteLine("Next: Run Stage 2 to import schema\n");
 
     return 0;
 }
