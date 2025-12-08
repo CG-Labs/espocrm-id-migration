@@ -497,8 +497,8 @@ async Task<int> Stage5_ImportData()
         Console.WriteLine($"[{i + 1}/{transformedFiles.Length}] Importing {fileName}...");
         Console.WriteLine($"  Size: {new FileInfo(file).Length / 1024 / 1024} MB");
 
-        // Import using mysql CLI (local connection, no host/port needed)
-        var importCmd = $"mysql -u {connParts["user"]} -p{connParts["password"]} espocrm_migration < \"{file}\"";
+        // Import using mysql CLI as root with binlog disabled to avoid filling disk
+        var importCmd = $"mysql --init-command=\"SET sql_log_bin=0\" espocrm_migration < \"{file}\"";
 
         var psi = new ProcessStartInfo
         {
