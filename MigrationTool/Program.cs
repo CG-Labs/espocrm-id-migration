@@ -24,6 +24,7 @@ Console.WriteLine($"Output: {outputPath}\n");
 
 // Menu
 Console.WriteLine("Stages:");
+Console.WriteLine("  0. Drop and recreate espocrm_migration database");
 Console.WriteLine("  1. Generate ID mapping SQL");
 Console.WriteLine("  2. Dump and transform schema");
 Console.WriteLine("  3. Dump data (7 large + 811 batch)");
@@ -33,12 +34,13 @@ Console.WriteLine("  5. Import transformed data");
 Console.WriteLine("  6. Benchmark queries (varchar vs bigint)");
 Console.WriteLine("  7. Run all stages");
 Console.WriteLine();
-Console.Write("Select (1-7 or 4b): ");
+Console.Write("Select (0-7 or 4b): ");
 
 var choice = Console.ReadLine();
 
 return choice switch
 {
+    "0" => await Stage0_RecreateDatabase(),
     "1" => await Stage1_GenerateMapping(),
     "2" => await Stage2_SchemaMigration(),
     "3" => await Stage3_DumpData(),
@@ -49,6 +51,54 @@ return choice switch
     "7" => await RunAll(),
     _ => 1
 };
+
+async Task<int> Stage0_RecreateDatabase()
+{
+    Console.WriteLine("\n=== Stage 0: Recreate Database ===\n");
+
+    Console.WriteLine("Dropping and recreating espocrm_migration database...");
+
+    using var conn = new MySqlConnection(connectionString);
+    await conn.OpenAsync();
+
+    using var dropCmd = new MySqlCommand("DROP DATABASE IF EXISTS espocrm_migration", conn);
+    await dropCmd.ExecuteNonQueryAsync();
+
+    using var createCmd = new MySqlCommand("CREATE DATABASE espocrm_migration", conn);
+    await createCmd.ExecuteNonQueryAsync();
+
+    Console.WriteLine("✓ Database recreated\n");
+    Console.WriteLine("Importing schema...");
+
+    var schemaFile = Path.Combine(outputPath, "02_schema_migration.sql");
+    if (!File.Exists(schemaFile))
+    {
+        Console.WriteLine($"ERROR: Schema file not found: {schemaFile}");
+        return 1;
+    }
+
+    var importCmd = $"mysql espocrm_migration < '{schemaFile}'";
+    var psi = new System.Diagnostics.ProcessStartInfo
+    {
+        FileName = "/bin/bash",
+        Arguments = $"-c \"{importCmd}\"",
+        UseShellExecute = false
+    };
+
+    using var process = System.Diagnostics.Process.Start(psi);
+    await process!.WaitForExitAsync();
+
+    if (process.ExitCode != 0)
+    {
+        Console.WriteLine("ERROR: Schema import failed");
+        return 1;
+    }
+
+    Console.WriteLine("✓ Schema imported\n");
+    Console.WriteLine("✓ espocrm_migration ready for fresh import\n");
+
+    return 0;
+}
 
 async Task<int> Stage1_GenerateMapping()
 {
