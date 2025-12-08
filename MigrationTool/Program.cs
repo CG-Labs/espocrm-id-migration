@@ -22,34 +22,53 @@ Console.WriteLine("EspoCRM ID Migration Tool");
 Console.WriteLine("=========================\n");
 Console.WriteLine($"Output: {outputPath}\n");
 
-// Menu
-Console.WriteLine("Stages:");
-Console.WriteLine("  0. Drop and recreate espocrm_migration database");
-Console.WriteLine("  1. Generate ID mapping");
-Console.WriteLine("  2. Dump and import schema");
-Console.WriteLine("  3. Dump data (7 large + 811 batch)");
-Console.WriteLine("  4. Transform dumps (includes patching)");
-Console.WriteLine("  5. Import transformed data");
-Console.WriteLine("  6. Benchmark queries (varchar vs bigint)");
-Console.WriteLine("  7. Run all stages");
-Console.WriteLine();
-Console.Write("Select (0-7): ");
-
-var choice = Console.ReadLine();
-
-return choice switch
+while (true)
 {
-    "0" => await Stage0_RecreateDatabase(),
-    "1" => await Stage1_GenerateMapping(),
-    "2" => await Stage2_SchemaMigration(),
-    "3" => await Stage3_DumpData(),
-    "4" => await Stage4_TransformDumps(),
-    "4b" => await Stage4b_PatchTransformedFiles(),
-    "5" => await Stage5_ImportData(),
-    "6" => await Stage6_BenchmarkQueries(),
-    "7" => await RunAll(),
-    _ => 1
-};
+    // Menu
+    Console.WriteLine("Stages:");
+    Console.WriteLine("  0. Drop and recreate espocrm_migration database");
+    Console.WriteLine("  1. Generate ID mapping");
+    Console.WriteLine("  2. Dump and import schema");
+    Console.WriteLine("  3. Dump data (7 large + 811 batch)");
+    Console.WriteLine("  4. Transform dumps (includes patching)");
+    Console.WriteLine("  5. Import transformed data");
+    Console.WriteLine("  6. Benchmark queries (varchar vs bigint)");
+    Console.WriteLine("  7. Run all stages");
+    Console.WriteLine("  q. Quit");
+    Console.WriteLine();
+    Console.Write("Select (0-7 or q): ");
+
+    var choice = Console.ReadLine();
+
+    if (choice == "q" || choice == "Q") return 0;
+
+    var result = choice switch
+    {
+        "0" => await Stage0_RecreateDatabase(),
+        "1" => await Stage1_GenerateMapping(),
+        "2" => await Stage2_SchemaMigration(),
+        "3" => await Stage3_DumpData(),
+        "4" => await Stage4_TransformDumps(),
+        "4b" => await Stage4b_PatchTransformedFiles(),
+        "5" => await Stage5_ImportData(),
+        "6" => await Stage6_BenchmarkQueries(),
+        "7" => await RunAll(),
+        _ => -1
+    };
+
+    if (result == -1)
+    {
+        Console.WriteLine("Invalid option\n");
+    }
+    else if (result != 0)
+    {
+        Console.WriteLine($"\nStage failed with error code {result}\n");
+    }
+    else
+    {
+        Console.WriteLine();
+    }
+}
 
 async Task<int> Stage0_RecreateDatabase()
 {
