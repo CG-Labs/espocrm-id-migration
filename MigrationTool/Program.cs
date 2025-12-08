@@ -56,46 +56,38 @@ async Task<int> Stage0_RecreateDatabase()
 {
     Console.WriteLine("\n=== Stage 0: Recreate Database ===\n");
 
-    Console.WriteLine("Dropping and recreating espocrm_migration database...");
-
-    using var conn = new MySqlConnection(connectionString);
-    await conn.OpenAsync();
-
-    using var dropCmd = new MySqlCommand("DROP DATABASE IF EXISTS espocrm_migration", conn);
-    await dropCmd.ExecuteNonQueryAsync();
-
-    using var createCmd = new MySqlCommand("CREATE DATABASE espocrm_migration", conn);
-    await createCmd.ExecuteNonQueryAsync();
-
-    Console.WriteLine("✓ Database recreated\n");
-    Console.WriteLine("Importing schema...");
-
+    var sqlFile = Path.Combine("..", "00_recreate_database.sql");
     var schemaFile = Path.Combine(outputPath, "02_schema_migration.sql");
-    if (!File.Exists(schemaFile))
-    {
-        Console.WriteLine($"ERROR: Schema file not found: {schemaFile}");
-        return 1;
-    }
 
-    var importCmd = $"mysql espocrm_migration < '{schemaFile}'";
+    Console.WriteLine("Dropping and recreating database...");
+    var dropCmd = $"mysql < '{sqlFile}'";
+
     var psi = new System.Diagnostics.ProcessStartInfo
     {
         FileName = "/bin/bash",
-        Arguments = $"-c \"{importCmd}\"",
+        Arguments = $"-c \"{dropCmd}\"",
         UseShellExecute = false
     };
 
     using var process = System.Diagnostics.Process.Start(psi);
     await process!.WaitForExitAsync();
 
-    if (process.ExitCode != 0)
+    Console.WriteLine("✓ Database recreated\n");
+    Console.WriteLine("Importing schema...");
+
+    var importCmd = $"mysql espocrm_migration < '{schemaFile}'";
+    psi = new System.Diagnostics.ProcessStartInfo
     {
-        Console.WriteLine("ERROR: Schema import failed");
-        return 1;
-    }
+        FileName = "/bin/bash",
+        Arguments = $"-c \"{importCmd}\"",
+        UseShellExecute = false
+    };
+
+    using var process2 = System.Diagnostics.Process.Start(psi);
+    await process2!.WaitForExitAsync();
 
     Console.WriteLine("✓ Schema imported\n");
-    Console.WriteLine("✓ espocrm_migration ready for fresh import\n");
+    Console.WriteLine("✓ espocrm_migration ready for fresh data\n");
 
     return 0;
 }
