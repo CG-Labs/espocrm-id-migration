@@ -88,7 +88,7 @@ async Task<int> Stage0_RecreateDatabase()
     await process!.WaitForExitAsync();
 
     Console.WriteLine("✓ espocrm_migration database dropped and recreated\n");
-    Console.WriteLine("Next: Run Stage 2 to import schema\n");
+    Console.WriteLine("Next: Run Stage 1 to generate mappings, then Stage 2 to import schema\n");
 
     return 0;
 }
