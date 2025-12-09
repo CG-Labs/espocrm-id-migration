@@ -158,7 +158,16 @@ PARTITION BY RANGE (YEAR(date_sent) * 100 + MONTH(date_sent)) (
 - Queries without date filters
 - FULLTEXT searches without date bounds
 
-**Verdict:** ✅ **Potentially effective** - NEEDS QUERY ANALYSIS
+**Verdict:** ❌ **NOT COMPATIBLE** - MySQL partitioned tables do not support FULLTEXT indexes
+
+**Critical Limitation Discovered:**
+- ERROR 1214: "The used table type doesn't support FULLTEXT indexes"
+- InnoDB partitioned tables CANNOT have FULLTEXT indexes
+- Email table requires FULLTEXT index for search functionality
+- **Therefore, partitioning the email table is NOT VIABLE**
+
+**Tested:** Attempted to create email_partitioned with RANGE partitioning by year
+**Result:** Failed - incompatible with existing FULLTEXT index on (name, body_plain, from_string)
 
 #### Option C: LIST Partitioning by Status
 ```sql
@@ -277,8 +286,8 @@ For each optimization strategy:
 
 ### High Priority
 1. ✅ **Move FULLTEXT index creation to post-import** - Implemented
-2. ⏳ **Analyze slow query EXPLAIN plans** - Pending index completion
-3. ⏳ **Consider date-based partitioning** - If queries commonly filter by date
+2. ✅ **Analyze slow query EXPLAIN plans** - Queries 01, 03, 04 complete
+3. ❌ **Table partitioning ruled out** - Incompatible with FULLTEXT indexes (MySQL limitation)
 
 ### Medium Priority
 4. **Add composite indexes** - Based on common query patterns
