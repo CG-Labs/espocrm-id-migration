@@ -591,6 +591,10 @@ async Task<int> Stage6_BenchmarkQueries()
 
     Console.WriteLine($"✓ Loaded {mapping.Count:N0} mappings\n");
 
+    // Create benchmarks directory
+    var benchmarksPath = Path.Combine(outputPath, "benchmarks");
+    Directory.CreateDirectory(benchmarksPath);
+
     // Transform and benchmark each query
     var idPattern = new Regex(@"'([0-9a-f]{17})'");
     var results = new List<string>();
@@ -601,12 +605,20 @@ async Task<int> Stage6_BenchmarkQueries()
 
         Console.WriteLine($"[{i + 1}/{queries.Count}] Benchmarking query (original VARCHAR time: {originalTime:F2}s)...");
 
+        // Save original query (VARCHAR)
+        var originalQueryFile = Path.Combine(benchmarksPath, $"query_{i + 1:D2}_varchar.sql");
+        await File.WriteAllTextAsync(originalQueryFile, $"-- Original query with VARCHAR(17) IDs\n-- Query time: {originalTime:F2}s\n-- Database: espocrm\n\n{query};\n");
+
         // Transform query varchar IDs to bigint
         var transformedQuery = idPattern.Replace(query, match =>
         {
             var oldId = match.Groups[1].Value;
             return mapping.TryGetValue(oldId, out var newId) ? $"'{newId}'" : match.Value;
         });
+
+        // Save transformed query (BIGINT)
+        var transformedQueryFile = Path.Combine(benchmarksPath, $"query_{i + 1:D2}_bigint.sql");
+        await File.WriteAllTextAsync(transformedQueryFile, $"-- Transformed query with BIGINT IDs\n-- Original time: {originalTime:F2}s\n-- Database: espocrm_migration\n\n{transformedQuery};\n");
 
         // Benchmark on espocrm_migration (bigint) only
         var bigintTime = await BenchmarkQuery("espocrm_migration", transformedQuery);
