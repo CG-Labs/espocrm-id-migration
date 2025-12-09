@@ -18,6 +18,7 @@ migration-output/
 **/migration-output/**
 id_mapping.json
 benchmarks/
+mysql_slow_query.log
 
 # IDE
 .vs/

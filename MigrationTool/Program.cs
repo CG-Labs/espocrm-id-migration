@@ -607,13 +607,22 @@ async Task<int> Stage6_BenchmarkQueries()
 {
     Console.WriteLine("\n=== Stage 6: Benchmark Queries ===\n");
 
-    var slowLogPath = Path.Combine(outputPath, "mysql_slow_query.log");
+    // Check for slow query log in current directory first, then output path
+    var slowLogPath = Path.Combine(Directory.GetCurrentDirectory(), "mysql_slow_query.log");
+    if (!File.Exists(slowLogPath))
+    {
+        slowLogPath = Path.Combine(outputPath, "mysql_slow_query.log");
+    }
 
     if (!File.Exists(slowLogPath))
     {
-        Console.WriteLine($"ERROR: Slow query log not found at {slowLogPath}");
+        Console.WriteLine($"ERROR: Slow query log not found");
+        Console.WriteLine($"  Checked: {Directory.GetCurrentDirectory()}/mysql_slow_query.log");
+        Console.WriteLine($"  Checked: {outputPath}/mysql_slow_query.log");
         return 1;
     }
+
+    Console.WriteLine($"Using slow query log: {slowLogPath}\n");
 
     // Parse slow query log
     Console.WriteLine("Parsing slow query log...");
