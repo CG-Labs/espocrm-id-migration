@@ -123,7 +123,12 @@ LIMIT 41
 - Warm cache: 15.75s
 
 **After OPTIMIZE TABLE:**
-- ⏳ Pending completion
+- Cold cache: 49.6s
+- Warm cache: **15.33s**
+
+**OPTIMIZE Impact:** Minimal (~3% improvement)
+
+**Conclusion:** Performance bottleneck is NOT fragmentation. The issue is suboptimal index selection and missing covering indexes for the sort operation. Implementing the recommended composite indexes should provide 40-60% improvement.
 
 ### Next Steps
 
