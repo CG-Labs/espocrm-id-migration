@@ -591,9 +591,18 @@ async Task<int> Stage6_BenchmarkQueries()
 
     Console.WriteLine($"✓ Loaded {mapping.Count:N0} mappings\n");
 
-    // Create benchmarks directory
-    var benchmarksPath = Path.Combine(outputPath, "benchmarks");
-    Directory.CreateDirectory(benchmarksPath);
+    // Create benchmarks directories (both remote and local)
+    var remoteBenchmarksPath = Path.Combine(outputPath, "benchmarks");
+    var remoteOldPath = Path.Combine(remoteBenchmarksPath, "old");
+    var remoteNewPath = Path.Combine(remoteBenchmarksPath, "new");
+    Directory.CreateDirectory(remoteOldPath);
+    Directory.CreateDirectory(remoteNewPath);
+
+    var localBenchmarksPath = Path.Combine(Directory.GetCurrentDirectory(), "benchmarks");
+    var localOldPath = Path.Combine(localBenchmarksPath, "old");
+    var localNewPath = Path.Combine(localBenchmarksPath, "new");
+    Directory.CreateDirectory(localOldPath);
+    Directory.CreateDirectory(localNewPath);
 
     // Transform and benchmark each query
     var idPattern = new Regex(@"'([0-9a-f]{17})'");
@@ -605,20 +614,25 @@ async Task<int> Stage6_BenchmarkQueries()
 
         Console.WriteLine($"[{i + 1}/{queries.Count}] Benchmarking query (original VARCHAR time: {originalTime:F2}s)...");
 
-        // Save original query (VARCHAR)
-        var originalQueryFile = Path.Combine(benchmarksPath, $"query_{i + 1:D2}_varchar.sql");
-        await File.WriteAllTextAsync(originalQueryFile, $"-- Original query with VARCHAR(17) IDs\n-- Query time: {originalTime:F2}s\n-- Database: espocrm\n\n{query};\n");
+        // Save original query (VARCHAR) - both remote and local
+        var queryFileName = $"query_{i + 1:D2}.sql";
+        var originalContent = $"-- Original query with VARCHAR(17) IDs\n-- Query time: {originalTime:F2}s\n-- Database: espocrm\n\n{query}";
 
-        // Transform query varchar IDs to bigint
+        await File.WriteAllTextAsync(Path.Combine(remoteOldPath, queryFileName), originalContent);
+        await File.WriteAllTextAsync(Path.Combine(localOldPath, queryFileName), originalContent);
+
+        // Transform query varchar IDs to bigint (unquoted)
         var transformedQuery = idPattern.Replace(query, match =>
         {
             var oldId = match.Groups[1].Value;
-            return mapping.TryGetValue(oldId, out var newId) ? $"'{newId}'" : match.Value;
+            return mapping.TryGetValue(oldId, out var newId) ? newId.ToString() : match.Value;
         });
 
-        // Save transformed query (BIGINT)
-        var transformedQueryFile = Path.Combine(benchmarksPath, $"query_{i + 1:D2}_bigint.sql");
-        await File.WriteAllTextAsync(transformedQueryFile, $"-- Transformed query with BIGINT IDs\n-- Original time: {originalTime:F2}s\n-- Database: espocrm_migration\n\n{transformedQuery};\n");
+        // Save transformed query (BIGINT) - both remote and local
+        var transformedContent = $"-- Transformed query with BIGINT IDs\n-- Original time: {originalTime:F2}s\n-- Database: espocrm_migration\n\n{transformedQuery}";
+
+        await File.WriteAllTextAsync(Path.Combine(remoteNewPath, queryFileName), transformedContent);
+        await File.WriteAllTextAsync(Path.Combine(localNewPath, queryFileName), transformedContent);
 
         // Benchmark on espocrm_migration (bigint) only
         var bigintTime = await BenchmarkQuery("espocrm_migration", transformedQuery);

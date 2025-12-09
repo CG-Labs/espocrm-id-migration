@@ -17,6 +17,7 @@ appsettings.json
 migration-output/
 **/migration-output/**
 id_mapping.json
+benchmarks/
 
 # IDE
 .vs/
