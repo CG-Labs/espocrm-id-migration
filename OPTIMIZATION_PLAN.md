@@ -234,23 +234,19 @@ ADD INDEX IDX_PARENT (parent_type, parent_id, deleted);
 
 **14 slow queries** identified with execution times ranging from 10.84s to 37.17s on VARCHAR implementation.
 
-### Queries Requiring Analysis (Once FULLTEXT Index Ready)
+### Benchmark Query Analysis
 
-Will run EXPLAIN ANALYZE on each query to determine:
-1. **Partition pruning effectiveness** - Which partitions are accessed?
-2. **Index usage** - Which indexes are used or missing?
-3. **Join performance** - Are joins optimized?
-4. **Full table scans** - Which queries scan entire table?
+**14 slow queries** identified with execution times ranging from 10.84s to 37.17s on VARCHAR implementation.
 
-### Expected Outputs
+**Analysis approach:**
+1. Run EXPLAIN on each query to understand execution plan
+2. Identify common patterns across queries
+3. Determine if partitioning would benefit query patterns
+4. Recommend indexes based on actual query behavior
 
-For each slow query, we will document:
-- Current execution plan (EXPLAIN)
-- Partition access pattern
-- Index recommendations
-- Estimated performance improvement with optimizations
+**Detailed analysis:** See `BENCHMARK_ANALYSIS.md` for individual query breakdowns
 
-**Status:** ⏳ Waiting for ALTER TABLE to complete (currently at 50+ minutes)
+**Status:** ⏳ 1/14 queries analyzed (Query 01 complete)
 
 ---
 
