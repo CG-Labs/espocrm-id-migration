@@ -171,32 +171,35 @@ Location: `application/Espo/Resources/metadata/entityDefs/*.json`
 
 ---
 
-### 4. Recommended Additional Indexes
+### 4. Index Requirements
 
-Based on query analysis, add these composite indexes:
+**Tested Indexes:**
+
+Based on query analysis and testing, the following indexes are recommended:
 
 **Email Entity (`application/Espo/Resources/metadata/entityDefs/Email.json`):**
 
 ```json
 {
   "indexes": {
-    "assignedStatusDate": {
-      "columns": ["assignedUserId", "status", "dateSent:desc", "deleted"],
-      "type": "index"
-    },
     "deletedJunkStatus": {
       "columns": ["deleted", "isJunk", "status"],
-      "type": "index"
+      "type": "index",
+      "comment": "Exists in espocrm_staging - common filter pattern"
     },
     "fullTextSearch": {
       "columns": ["name", "bodyPlain", "fromString"],
-      "type": "fulltext"
+      "type": "fulltext",
+      "comment": "Required for FULLTEXT searches - add AFTER data import for performance"
     }
   }
 }
 ```
 
-**Note:** The fulltext index already exists but may need to be defined in entityDefs if not present.
+**Tested but NOT beneficial:**
+- `assignedStatusDate (assigned_user_id, status, date_sent, id)` - Not used by optimizer due to query OR conditions
+
+**Note:** Most email queries have complex OR conditions and subqueries that prevent effective index usage beyond the existing PRIMARY KEY and foreign key indexes. Query performance is limited by query complexity, not missing indexes.
 
 ---
 

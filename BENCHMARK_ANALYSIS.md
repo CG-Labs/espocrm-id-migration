@@ -130,12 +130,49 @@ LIMIT 41
 
 **Conclusion:** Performance bottleneck is NOT fragmentation. The issue is suboptimal index selection and missing covering indexes for the sort operation. Implementing the recommended composite indexes should provide 40-60% improvement.
 
-### Next Steps
+### Index Testing Results
 
-1. ⏳ Complete OPTIMIZE TABLE
-2. ⏳ Re-run query and measure performance impact
-3. ⏳ Test recommended index additions
-4. ⏳ Compare performance with/without new indexes
+**Test 1: IDX_ASSIGNED_STATUS_DATE Index**
+```sql
+CREATE INDEX IDX_ASSIGNED_STATUS_DATE ON email (
+  assigned_user_id, status, date_sent DESC, id DESC, deleted
+);
+```
+
+**Result:** ❌ **No improvement** (14.42s - same as before)
+
+**Reason:** Index not used by query optimizer. The query filters on:
+- `from_email_address_id IN (...)` OR `(status = 'Sent' AND created_by_id = ...)`
+- `assigned_user_id` filter comes from JOIN, not WHERE clause
+- MySQL cannot use this index for the actual query pattern
+
+**Lesson:** Index must match actual WHERE clause filters, not JOIN conditions.
+
+### Revised Analysis
+
+The query has complex filtering:
+1. Subquery filtering on `email.id IN (...)`
+2. OR condition: `from_email_address_id` OR `(status + created_by_id)`
+3. Additional filters on status, trash, folder
+4. FULLTEXT MATCH
+5. ORDER BY date_sent DESC, id DESC
+
+**The filesort cannot be avoided** without rewriting the query because:
+- Complex OR conditions prevent single index usage
+- Subquery + OR + FULLTEXT combination is inherently expensive
+- No single index can satisfy all conditions and provide sorted output
+
+### Recommendations
+
+**For EspoCRM entityDefs:**
+- ✅ Existing indexes are adequate for this query pattern
+- ❌ No additional indexes will significantly improve this specific query
+- ⚠️ Performance is limited by query complexity, not missing indexes
+
+**For optimization:**
+- Consider query rewrite at application level
+- Simplify OR conditions if possible
+- Use separate queries for different search modes (from_address vs created_by)
 
 ---
 
