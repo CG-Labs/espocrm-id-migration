@@ -232,6 +232,41 @@ async Task<int> Stage2_SchemaMigration()
     transformed = Regex.Replace(transformed, @"bigint unsigned NOT NULL DEFAULT ''", "bigint unsigned NOT NULL DEFAULT 0");
     transformed = Regex.Replace(transformed, @"bigint unsigned DEFAULT ''", "bigint unsigned DEFAULT NULL");
 
+    // Extract FULLTEXT indexes to add after data import (for performance)
+    Console.WriteLine("Extracting FULLTEXT indexes...");
+    var fulltextPattern = new Regex(@"^\s*FULLTEXT KEY `([^`]+)` \(([^)]+)\),?\s*$", RegexOptions.Multiline);
+    var fulltextMatches = fulltextPattern.Matches(transformed);
+    var fulltextIndexes = new List<string>();
+
+    var tablePattern = new Regex(@"CREATE TABLE `([^`]+)`", RegexOptions.Multiline);
+    var lines = transformed.Split('\n');
+    string? currentTable = null;
+
+    for (int i = 0; i < lines.Length; i++)
+    {
+        var tableMatch = tablePattern.Match(lines[i]);
+        if (tableMatch.Success)
+        {
+            currentTable = tableMatch.Groups[1].Value;
+        }
+
+        var ftMatch = fulltextPattern.Match(lines[i]);
+        if (ftMatch.Success && currentTable != null)
+        {
+            var indexName = ftMatch.Groups[1].Value;
+            var columns = ftMatch.Groups[2].Value;
+            fulltextIndexes.Add($"ALTER TABLE `{currentTable}` ADD FULLTEXT INDEX `{indexName}` ({columns});");
+        }
+    }
+
+    // Save FULLTEXT indexes to separate file
+    var fulltextFile = Path.Combine(outputPath, "fulltext_indexes.sql");
+    await File.WriteAllLinesAsync(fulltextFile, fulltextIndexes);
+    Console.WriteLine($"✓ Extracted {fulltextIndexes.Count} FULLTEXT indexes to {fulltextFile}");
+
+    // Remove FULLTEXT indexes from schema (will be added after data import)
+    transformed = fulltextPattern.Replace(transformed, "");
+
     await File.WriteAllTextAsync(finalFile, transformed);
     File.Delete(tempFile);
 
@@ -518,7 +553,52 @@ async Task<int> Stage5_ImportData()
         Console.WriteLine($"\r  ✓ Complete in {totalTime:F1} minutes                    ");
     }
 
-    Console.WriteLine($"\n✓ Stage 5 Complete - All files imported\n");
+    Console.WriteLine($"\n✓ All data files imported\n");
+
+    // Add FULLTEXT indexes after data import (for performance)
+    var fulltextFile = Path.Combine(outputPath, "fulltext_indexes.sql");
+    if (File.Exists(fulltextFile))
+    {
+        var fulltextIndexes = await File.ReadAllLinesAsync(fulltextFile);
+        if (fulltextIndexes.Length > 0)
+        {
+            Console.WriteLine($"Adding {fulltextIndexes.Length} FULLTEXT indexes...\n");
+
+            using var conn = new MySqlConnection(connectionString.Replace("Database=espocrm", "Database=espocrm_migration"));
+            await conn.OpenAsync();
+
+            for (int i = 0; i < fulltextIndexes.Length; i++)
+            {
+                var sql = fulltextIndexes[i];
+                if (string.IsNullOrWhiteSpace(sql)) continue;
+
+                // Extract table name for display
+                var tableMatch = Regex.Match(sql, @"ALTER TABLE `([^`]+)`");
+                var tableName = tableMatch.Success ? tableMatch.Groups[1].Value : "unknown";
+
+                Console.Write($"  [{i + 1}/{fulltextIndexes.Length}] {tableName}... ");
+
+                var startTime = DateTime.Now;
+                try
+                {
+                    using var cmd = new MySqlCommand(sql, conn);
+                    cmd.CommandTimeout = 3600; // 1 hour timeout for large tables
+                    await cmd.ExecuteNonQueryAsync();
+
+                    var elapsed = (DateTime.Now - startTime).TotalMinutes;
+                    Console.WriteLine($"✓ ({elapsed:F1} min)");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"✗ ERROR: {ex.Message}");
+                }
+            }
+
+            Console.WriteLine();
+        }
+    }
+
+    Console.WriteLine($"✓ Stage 5 Complete - All data imported and indexes created\n");
 
     return 0;
 }
